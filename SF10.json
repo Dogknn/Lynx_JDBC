@@ -1,0 +1,451 @@
+{
+  "RDBTables": [],
+  "Nodes" : [ {
+    "nodeName" : "comment",
+    "nodeLabel" : "comment",
+    "bindingTable" : "comment"
+  }, {
+    "nodeName" : "forum",
+    "nodeLabel" : "forum",
+    "bindingTable" : "forum"
+  }, {
+    "nodeName" : "organisation",
+    "nodeLabel" : "organisation",
+    "bindingTable" : "organisation"
+  }, {
+    "nodeName" : "person",
+    "nodeLabel" : "person",
+    "bindingTable" : "person"
+  }, {
+    "nodeName" : "place",
+    "nodeLabel" : "place",
+    "bindingTable" : "place"
+  }, {
+    "nodeName" : "post",
+    "nodeLabel" : "post",
+    "bindingTable" : "post"
+  }, {
+    "nodeName" : "tag",
+    "nodeLabel" : "tag",
+    "bindingTable" : "tag"
+  }, {
+    "nodeName" : "tagclass",
+    "nodeLabel" : "tagclass",
+    "bindingTable" : "tagclass"
+  } ],
+  "Relationships" : [ {
+    "relationshipType" : "comment_hasCreator_person",
+    "sourceTableName" : "comment",
+    "sourceCol" : {
+      "columnName" : "Comment_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "comment",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "person",
+    "targetCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "comment_hasCreator_person"
+  }, {
+    "relationshipType" : "comment_hasTag_tag",
+    "sourceTableName" : "comment",
+    "sourceCol" : {
+      "columnName" : "Comment_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "comment",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "tag",
+    "targetCol" : {
+      "columnName" : "Tag_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tag",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "comment_hasTag_tag"
+  }, {
+    "relationshipType" : "comment_isLocatedIn_place",
+    "sourceTableName" : "comment",
+    "sourceCol" : {
+      "columnName" : "Comment_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "comment",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "place",
+    "targetCol" : {
+      "columnName" : "Place_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "place",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "comment_isLocatedIn_place"
+  }, {
+    "relationshipType" : "comment_replyOf_comment",
+    "sourceTableName" : "comment",
+    "sourceCol" : {
+      "columnName" : "Comment_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "comment",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "comment",
+    "targetCol" : {
+      "columnName" : "ReplyComment_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "comment",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "comment_replyOf_comment"
+  }, {
+    "relationshipType" : "comment_replyOf_post",
+    "sourceTableName" : "comment",
+    "sourceCol" : {
+      "columnName" : "Comment_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "comment",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "post",
+    "targetCol" : {
+      "columnName" : "Post_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "post",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "comment_replyOf_post"
+  }, {
+    "relationshipType" : "forum_containerOf_post",
+    "sourceTableName" : "forum",
+    "sourceCol" : {
+      "columnName" : "Forum_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "forum",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "post",
+    "targetCol" : {
+      "columnName" : "Post_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "post",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "forum_containerOf_post"
+  }, {
+    "relationshipType" : "forum_hasMember_person",
+    "sourceTableName" : "forum",
+    "sourceCol" : {
+      "columnName" : "Forum_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "forum",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "person",
+    "targetCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "forum_hasMember_person"
+  }, {
+    "relationshipType" : "forum_hasModerator_person",
+    "sourceTableName" : "forum",
+    "sourceCol" : {
+      "columnName" : "Forum_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "forum",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "person",
+    "targetCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "forum_hasModerator_person"
+  }, {
+    "relationshipType" : "forum_hasTag_tag",
+    "sourceTableName" : "forum",
+    "sourceCol" : {
+      "columnName" : "Forum_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "forum",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "tag",
+    "targetCol" : {
+      "columnName" : "Tag_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tag",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "forum_hasTag_tag"
+  }, {
+    "relationshipType" : "organisation_isLocatedIn_place",
+    "sourceTableName" : "organisation",
+    "sourceCol" : {
+      "columnName" : "Organisation_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "organisation",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "place",
+    "targetCol" : {
+      "columnName" : "Place_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "place",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "organisation_isLocatedIn_place"
+  }, {
+    "relationshipType" : "person_hasInterest_tag",
+    "sourceTableName" : "person",
+    "sourceCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "tag",
+    "targetCol" : {
+      "columnName" : "Tag_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tag",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "person_hasInterest_tag"
+  }, {
+    "relationshipType" : "person_isLocatedIn_place",
+    "sourceTableName" : "person",
+    "sourceCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "place",
+    "targetCol" : {
+      "columnName" : "Place_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "place",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "person_isLocatedIn_place"
+  }, {
+    "relationshipType" : "person_knows_person",
+    "sourceTableName" : "person",
+    "sourceCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "person",
+    "targetCol" : {
+      "columnName" : "OtherPerson_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "person_knows_person"
+  }, {
+    "relationshipType" : "person_likes_comment",
+    "sourceTableName" : "comment",
+    "sourceCol" : {
+      "columnName" : "Comment_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "comment",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "person",
+    "targetCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "person_likes_comment"
+  }, {
+    "relationshipType" : "person_likes_post",
+    "sourceTableName" : "person",
+    "sourceCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "post",
+    "targetCol" : {
+      "columnName" : "Post_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "post",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "person_likes_post"
+  }, {
+    "relationshipType" : "person_studyAt_organisation",
+    "sourceTableName" : "organisation",
+    "sourceCol" : {
+      "columnName" : "Organisation_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "organisation",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "person",
+    "targetCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "person_studyAt_organisation"
+  }, {
+    "relationshipType" : "person_workAt_organisation",
+    "sourceTableName" : "organisation",
+    "sourceCol" : {
+      "columnName" : "Organisation_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "organisation",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "person",
+    "targetCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "person_workAt_organisation"
+  }, {
+    "relationshipType" : "place_isPartOf_place",
+    "sourceTableName" : "place",
+    "sourceCol" : {
+      "columnName" : "Place_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "place",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "place",
+    "targetCol" : {
+      "columnName" : "ParentPlace_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "place",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "place_isPartOf_place"
+  }, {
+    "relationshipType" : "post_hasCreator_person",
+    "sourceTableName" : "person",
+    "sourceCol" : {
+      "columnName" : "Person_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "person",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "post",
+    "targetCol" : {
+      "columnName" : "Post_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "post",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "post_hasCreator_person"
+  }, {
+    "relationshipType" : "post_hasTag_tag",
+    "sourceTableName" : "post",
+    "sourceCol" : {
+      "columnName" : "Post_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "post",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "tag",
+    "targetCol" : {
+      "columnName" : "Tag_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tag",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "post_hasTag_tag"
+  }, {
+    "relationshipType" : "post_isLocatedIn_place",
+    "sourceTableName" : "place",
+    "sourceCol" : {
+      "columnName" : "Place_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "place",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "post",
+    "targetCol" : {
+      "columnName" : "Post_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "post",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "post_isLocatedIn_place"
+  }, {
+    "relationshipType" : "tag_hasType_tagclass",
+    "sourceTableName" : "tag",
+    "sourceCol" : {
+      "columnName" : "Tag_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tag",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "tagclass",
+    "targetCol" : {
+      "columnName" : "TagClass_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tagclass",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "tag_hasType_tagclass"
+  }, {
+    "relationshipType" : "tagclass_isSubclassOf_tagclass",
+    "sourceTableName" : "tagclass",
+    "sourceCol" : {
+      "columnName" : "TagClass_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tagclass",
+      "referenceTableCol" : "id"
+    },
+    "direction" : "OUTGOING",
+    "targetableName" : "tagclass",
+    "targetCol" : {
+      "columnName" : "SuperClass_id",
+      "dataType" : "BIGINT",
+      "referenceTableName" : "tagclass",
+      "referenceTableCol" : "id"
+    },
+    "bindingTable" : "tagclass_isSubclassOf_tagclass"
+  } ]
+}
