@@ -1,3 +1,4 @@
+import LDBCTest.MyGraph
 import org.junit.jupiter.api.Test
 import schema.{Schema, SchemaManager}
 
@@ -19,5 +20,29 @@ class SchemaTest {
     println(schema.tables)
     schema.gRelationship.size ==1
 
+  }
+
+
+  @Test
+  def Q7(): Unit = {
+    val q =
+      """
+        |MATCH (n:person {id: $personId })-[r:knows]-(friend:person)
+        |RETURN
+        |    friend.id AS personId,
+        |    friend.firstName AS firstName,
+        |    friend.lastName AS lastName,
+        |    r.creationDate AS friendshipCreationDate
+        |ORDER BY
+        |    friendshipCreationDate DESC,
+        |    toInteger(personId) ASC
+        |""".stripMargin
+    val p = Map("personId" -> "443")
+    //预热
+    MyGraph.run(q, p)
+
+    val startTime = System.currentTimeMillis()
+    MyGraph.run(q, p).show()
+    System.out.println("程序运行时间： " + (System.currentTimeMillis() - startTime) + "ms")
   }
 }
