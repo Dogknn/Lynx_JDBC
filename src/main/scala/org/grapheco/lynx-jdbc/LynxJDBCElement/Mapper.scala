@@ -2,8 +2,8 @@ package LynxJDBCElement
 
 import org.grapheco.lynx.types.LynxValue
 import org.grapheco.lynx.types.structural.{LynxNodeLabel, LynxPropertyKey, LynxRelationshipType}
+import schema.{GraphRelationship, RDBTable, Schema}
 import schema.element.{BaseProperty, PKProperty, Property}
-import schema._
 
 import java.sql.ResultSet
 import java.time.LocalDate
@@ -41,7 +41,7 @@ object Mapper {
   }
 
   def mapRel(row: ResultSet, tableName: String, schema: Schema): LynxJDBCRelationship = {
-    val _triple = schema.getReltionshipByType(tableName)
+    val _triple = schema.getReltionshipByTable(tableName)
     val _graphTable = schema.getTableByName(tableName)
     if (_triple == GraphRelationship.empty) throw new Exception("schema not find")
     //TODO  getByFK

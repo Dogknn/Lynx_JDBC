@@ -1,7 +1,7 @@
 package schema
 
 import play.api.libs.json.{Json, Reads, Writes}
-import schema.element._
+import schema.element.{BaseProperty, FKProperty, PKProperty}
 
 /**
  * Used to record the structure of tables in the database, including primary-foreign key relationships and other properties

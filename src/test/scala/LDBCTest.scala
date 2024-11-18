@@ -411,7 +411,7 @@ class LDBCTest {
 }
 object LDBCTest {
   val MyGraph: LynxJDBCConnector = LynxJDBCConnector.connect(
-    "jdbc:mysql://localhost:3307/ldbc-0.003?serverTimezone=UTC&useUnicode=true&characterEncoding=utf8&useSSL=false",
-    "root", "root"
+    "jdbc:mysql://49.232.149.246:3306/LDBCSF10?serverTimezone=UTC&useUnicode=true&characterEncoding=utf8&useSSL=false",
+    "root", "1020@Wwt"
     , SchemaManager.readJson("SF11.json"))
 }

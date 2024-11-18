@@ -1,8 +1,6 @@
 package schema
 
-import org.opencypher.v9_0.expressions.SemanticDirection
 import play.api.libs.json.{Json, Reads, Writes}
-import schema.element.Property
 
 /**
  *

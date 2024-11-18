@@ -1145,7 +1145,7 @@
     },
     "bindingTable" : "person_isLocatedIn_place"
   }, {
-    "relationshipType" : "person_knows_person",
+    "relationshipType" : "knows",
     "sourceTableName" : "person",
     "sourceCol" : {
       "columnName" : "Person_id",

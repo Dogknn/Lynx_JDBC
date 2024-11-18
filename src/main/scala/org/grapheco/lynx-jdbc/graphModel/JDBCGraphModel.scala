@@ -1,18 +1,17 @@
 package graphModel
 
-import LynxJDBCElement.{LynxJDBCNode, Mapper}
+import LynxJDBCElement.{LynxIntegerID, LynxJDBCNode, LynxJDBCRelationship, Mapper}
 import LynxJDBCElement.Mapper.mapRel
 import com.typesafe.scalalogging.LazyLogging
+import org.grapheco.lynx.types.structural.LynxId
 import org.grapheco.lynx.physical.{NodeInput, RelationshipInput}
 import org.grapheco.lynx.runner.{GraphModel, NodeFilter, RelationshipFilter, WriteTask}
 import org.grapheco.lynx.types.LynxValue
-import org.grapheco.lynx.types.structural.{LynxId, LynxNode, LynxNodeLabel, LynxPath, LynxPropertyKey, LynxRelationship, LynxRelationshipType, PathTriple}
+import org.grapheco.lynx.types.structural.{LynxNode, LynxNodeLabel, LynxPath, LynxPropertyKey, LynxRelationship, LynxRelationshipType, PathTriple}
 import org.opencypher.v9_0.expressions.SemanticDirection
 import schema._
 
-import java.sql.{Connection, ResultSet, SQLException}
-import scala.Iterator
-import scala.collection.Seq
+import java.sql.{Connection, ResultSet}
 
 class JDBCGraphModel(val connection: Connection, val schema: Schema) extends GraphModel with LazyLogging {
   override def write: WriteTask = new WriteTask {
@@ -26,11 +25,11 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
 
     override def updateRelationShip(lynxId: LynxId, props: Map[LynxPropertyKey, LynxValue]): Option[LynxRelationship] = ???
 
-    override def setNodesProperties(nodeIds: Iterator[LynxId], data: Array[(LynxPropertyKey, Any)], cleanExistProperties: Boolean): Iterator[Option[LynxNode]] = ???
+    override def setNodesProperties(nodeIds: Iterator[LynxId], data: Array[(LynxPropertyKey, LynxValue)], cleanExistProperties: Boolean): Iterator[Option[LynxNode]] = ???
 
     override def setNodesLabels(nodeIds: Iterator[LynxId], labels: Array[LynxNodeLabel]): Iterator[Option[LynxNode]] = ???
 
-    override def setRelationshipsProperties(relationshipIds: Iterator[LynxId], data: Array[(LynxPropertyKey, Any)]): Iterator[Option[LynxRelationship]] = ???
+    override def setRelationshipsProperties(relationshipIds: Iterator[LynxId], data: Array[(LynxPropertyKey, LynxValue)], cleanExistProperties: Boolean): Iterator[Option[LynxRelationship]] = ???
 
     override def setRelationshipsType(relationshipIds: Iterator[LynxId], typeName: LynxRelationshipType): Iterator[Option[LynxRelationship]] = ???
 
@@ -50,36 +49,14 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
     nodeAt(id, nameList)
   }
 
-  //  class ResultSetIterator(resultSet: ResultSet) extends AbstractIterator[ResultSet] {
-  //    override def hasNext: Boolean = resultSet.next()
-  //    override def next(): ResultSet = resultSet
-  //  }
-  private def excute(sql: String): Iterator[ResultSet] = {
+  private def execute(sql: String): Iterator[ResultSet] = {
     logger.info(sql)
     val statement = connection.createStatement()
     val result = statement.executeQuery(sql)
     Iterator.continually(result).takeWhile(_.next())
   }
 
-  private def excuteQuery(sql: String): Iterator[ResultSet] = {
-//    try {
-      logger.info(sql)
-      val statement = connection.createStatement()
-      val result = statement.executeQuery(sql)
-      Iterator.continually(result).takeWhile(_.next())
-//      //      new ResultSetIterator(result)
-//      //  class ResultSetIterator(resultSet: ResultSet) extends AbstractIterator[ResultSet] {
-//      //    override def hasNext: Boolean = resultSet.next()
-//      //    override def next(): ResultSet = resultSet
-//      //  }
-//    } catch {
-//      case e: SQLException =>
-//        e.printStackTrace()
-//        Iterator.empty
-//    }
-  }
-
-  private def iterExecute(sql: String): Iterator[ResultSet] = {
+  private def executeQuery(sql: String): Iterator[ResultSet] = {
     logger.info(sql)
     val statement = connection.createStatement()
     val result = statement.executeQuery(sql)
@@ -96,10 +73,7 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
             case (k, v) => s"$k = $v"
           }.mkString("and")
         }"
-//        println(sql)
-        excuteQuery(sql)
-        println( excuteQuery(sql).toSeq.head.toString)
-        excuteQuery(sql)
+        executeQuery(sql)
       case RDBTable.empty => Iterator.empty
     }
   }
@@ -147,35 +121,63 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
   private def expand(node: LynxNode, filter: RelationshipFilter, direction: SemanticDirection): Iterator[PathTriple] = {
     val nodeId = node.id
     val nodeLabel = node.labels.head.value
-    //    val nodeTable = node.
     val rel_Type = filter.types.head.value
     val rel_Condition = filter.properties.map {
       case (k, v) => s"${k.value} = ${v.value}"
     }
-    val rel_Node = ""
-    //      schema.getRel_Node(nodeLabel, rel_Type, direction)
-    if (rel_Node.isEmpty)
-      return Iterator.empty
-
-    //    val selectWhat = schema.triples
+    val relTable = schema.getReltionshipByType(rel_Type)
     val whereSql = (direction match {
-      case SemanticDirection.OUTGOING => s"where $rel_Type.$rel_Node = ${nodeId.toLynxInteger.value}"
-      case SemanticDirection.INCOMING => s"where $rel_Type.$rel_Node = ${nodeId.toLynxInteger.value}"
+      case SemanticDirection.OUTGOING => s"where ${relTable.bindingTable}.${relTable.sourceCol.columnName} = ${nodeId.toLynxInteger.value}"
+      case SemanticDirection.INCOMING => s"where ${relTable.bindingTable}.${relTable.targetCol.columnName} = ${nodeId.toLynxInteger.value}"
+      case SemanticDirection.BOTH => s"where ${relTable.bindingTable}.${relTable.sourceCol.columnName} = ${nodeId.toLynxInteger.value}"
     }) + (if (rel_Condition.nonEmpty) " and " + rel_Condition.mkString(" and ") else "")
-    val sql = s"select * from $whereSql"
-    excute(sql).map { rs =>
-      val endNode = direction match {
-        case _ =>
-      }
-      PathTriple(node, mapRel(rs, "", schema), node)
-    }
+    val sql = s"select * from ${relTable.bindingTable} $whereSql"
+
+        execute(sql).map { rs =>
+          val endNode = direction match {
+            case SemanticDirection.OUTGOING => nodeAt(LynxIntegerID(rs.getLong(relTable.sourceCol.columnName)), relTable.targetTableName)
+            case SemanticDirection.INCOMING => nodeAt(LynxIntegerID(rs.getLong(relTable.targetCol.columnName)), relTable.targetTableName)
+            case SemanticDirection.BOTH => nodeAt(LynxIntegerID(rs.getLong(relTable.targetCol.columnName)), relTable.targetTableName)
+          }
+          PathTriple(node, mapRel(rs, relTable.bindingTable, schema), endNode.get)
+        }
+
+//    // select in
+//    val (ids, endTable) = direction match {
+//      case SemanticDirection.OUTGOING => (execute(sql).map { rs => LynxIntegerID(rs.getLong(relTable.sourceCol.columnName)) }, relTable.sourceTableName)
+//      case SemanticDirection.INCOMING => (execute(sql).map { rs => LynxIntegerID(rs.getLong(relTable.targetCol.columnName)) }, relTable.targetTableName)
+//      case SemanticDirection.BOTH => (execute(sql).map { rs => LynxIntegerID(rs.getLong(relTable.targetCol.columnName)) }, relTable.targetTableName)
+//    }
+//    nodesAt(ids, endTable).map(en => PathTriple(node,
+//      LynxJDBCRelationship(
+//        LynxIntegerID(nodeId.toLynxInteger.value),
+//        LynxIntegerID(nodeId.toLynxInteger.value),
+//        LynxIntegerID(en.id.toLynxInteger.value),
+//        Some(LynxRelationshipType(rel_Type)),
+//        schema.getTableByName(relTable.bindingTable).properties.map(prop => (LynxPropertyKey(prop.columnName), LynxValue(prop.dataType))).toMap
+//      ), en))
+
   }
+
 
   private def nodeAt(id: LynxId, tableName: String): Option[LynxNode] = {
     val nodeId = schema.getTableByName(tableName).priKeyCol.columnName
     singleTableSelect(tableName, List((nodeId, id.toLynxInteger.v)))
       .map(rs => Mapper.mapNode(rs, tableName, schema)).toSeq.headOption
   }
+
+  private def nodesAt(ids: Iterator[LynxId], tableName: String): Iterator[LynxNode] = {
+    val table = schema.getTableByName(tableName)
+    table match {
+      case RDBTable.empty =>
+        Iterator.empty
+      case t: RDBTable =>
+        val idCondition = ids.map(id => s"id = ${id.value}").mkString(" or ")
+        val sql = s"select * from ${t.tableName} where $idCondition"
+        executeQuery(sql).map(rs => Mapper.mapNode(rs, tableName, schema))
+    }
+  }
+
 
   private def nodeAt(id: LynxId, nameList: Seq[String]): Option[LynxNode] = {
     nameList.flatMap { t =>
@@ -215,7 +217,7 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
       val firstStop = expandNonStop(originStation, relationshipFilter, direction, lowerLimit)
       val leftSteps = Math.min(upperLimit, 100) - lowerLimit // TODO set a super upperLimit
       firstStop.flatMap(p => extendPath(p, relationshipFilter, direction, leftSteps))
-    }.filter(_.endNode.forall(endNodeFilter.matches))
+    }.filter(_.endNode.forall(endNode => endNodeFilter.matches(endNode)))
   }
 
   override def nodes(): Iterator[LynxJDBCNode] =

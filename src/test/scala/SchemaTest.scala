@@ -27,15 +27,11 @@ class SchemaTest {
   def Q7(): Unit = {
     val q =
       """
-        |MATCH (n:person {id: $personId })-[r:knows]-(friend:person)
+        |MATCH (n:person {id: $personId })-[r:knows*3]-(friend:person)
         |RETURN
         |    friend.id AS personId,
         |    friend.firstName AS firstName,
-        |    friend.lastName AS lastName,
-        |    r.creationDate AS friendshipCreationDate
-        |ORDER BY
-        |    friendshipCreationDate DESC,
-        |    toInteger(personId) ASC
+        |    friend.lastName AS lastName
         |""".stripMargin
     val p = Map("personId" -> "443")
     //预热
