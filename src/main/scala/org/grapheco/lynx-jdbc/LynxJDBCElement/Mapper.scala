@@ -1,7 +1,7 @@
 package LynxJDBCElement
 
 import org.grapheco.lynx.types.LynxValue
-import org.grapheco.lynx.types.structural.{LynxNodeLabel, LynxPropertyKey, LynxRelationshipType}
+import org.grapheco.lynx.types.structural.{LynxId, LynxNode, LynxNodeLabel, LynxPropertyKey, LynxRelationshipType}
 import schema.{GraphRelationship, RDBTable, Schema}
 import schema.element.{BaseProperty, PKProperty, Property}
 
@@ -40,6 +40,7 @@ object Mapper {
     LynxJDBCNode(mapId(row, _schema.priKeyCol), Seq(LynxNodeLabel(_schema.priKeyCol.nodeLabel)), mapProps(row, _schema.properties))
   }
 
+
   def mapRel(row: ResultSet, tableName: String, schema: Schema): LynxJDBCRelationship = {
     val _triple = schema.getReltionshipByTable(tableName)
     val _graphTable = schema.getTableByName(tableName)
@@ -51,7 +52,18 @@ object Mapper {
       mapStartId(row, _triple.sourceCol),
       mapEndId(row, _triple.targetCol),
       Some(LynxRelationshipType(_triple.relationshipType)),
-      _graphTable.properties.map(prop => (LynxPropertyKey(prop.columnName), LynxValue(prop.dataType))).toMap
+      mapProps(row, _graphTable.properties)
+      //      _graphTable.properties.map(prop => (LynxPropertyKey(prop.columnName), LynxValue(prop.dataType))).toMap
     )
   }
+
+  //  def mapRel(sn: LynxNode, rt: String,en: LynxNode, schema: Schema): LynxJDBCRelationship = {
+  //    LynxJDBCRelationship(
+  //      LynxIntegerID(sn.id.toLynxInteger.value),
+  //      LynxIntegerID(sn.id.toLynxInteger.value),
+  //      LynxIntegerID(en.id.toLynxInteger.value),
+  //      Some(LynxRelationshipType(rt)),
+  //      schema.getTableByName(relTable.bindingTable).properties.map(prop => (LynxPropertyKey(prop.columnName), LynxValue(prop.dataType))).toMap
+  //    )
+  //  }
 }

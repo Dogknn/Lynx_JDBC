@@ -14,11 +14,30 @@ class SchemaTest {
   }
 
   @Test
+  def queryTest(): Unit = {
+    val q =
+      """
+        |MATCH (n:person {id: $personId })-[:knows]-(friend3:person)
+        |RETURN
+        |  friend3.id AS personId,
+        |  friend3.firstName AS firstName,
+        |  friend3.lastName AS lastName
+        |""".stripMargin
+    val p = Map("personId" -> "443")
+    val startTime1 = System.currentTimeMillis()
+    MyGraph.run(q, p).show()
+    System.out.println("程序运行时间： " + (System.currentTimeMillis() - startTime1) + "ms")
+    //    val startTime = System.currentTimeMillis()
+    //    MyGraph.run(q, p).show()
+    //    System.out.println("程序运行时间： " + (System.currentTimeMillis() - startTime) + "ms")
+  }
+
+  @Test
   def loadSchema(): Unit = {
     var schema = SchemaManager.readJson("SF11.json")
     println(111)
     println(schema.tables)
-    schema.gRelationship.size ==1
+    schema.gRelationship.size == 1
 
   }
 
@@ -27,16 +46,18 @@ class SchemaTest {
   def Q7(): Unit = {
     val q =
       """
-        |MATCH (n:person {id: $personId })-[r:knows*3]-(friend:person)
+        |MATCH (n:person {id: $personId })-[:knows*3]-(friend3:person)
         |RETURN
-        |    friend.id AS personId,
-        |    friend.firstName AS firstName,
-        |    friend.lastName AS lastName
+        |    friend3.id AS personId,
+        |    friend3.firstName AS firstName,
+        |    friend3.lastName AS lastName
         |""".stripMargin
     val p = Map("personId" -> "443")
     //预热
-    MyGraph.run(q, p)
-
+    //    MyGraph.run(q, p).show()
+//    val startTime1 = System.currentTimeMillis()
+//    MyGraph.run(q, p).show()
+//    System.out.println("程序运行时间： " + (System.currentTimeMillis() - startTime1) + "ms")
     val startTime = System.currentTimeMillis()
     MyGraph.run(q, p).show()
     System.out.println("程序运行时间： " + (System.currentTimeMillis() - startTime) + "ms")
