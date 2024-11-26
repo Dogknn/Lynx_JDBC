@@ -5,7 +5,6 @@ import org.grapheco.lynx.LynxResult
 import org.grapheco.lynx.runner.{CypherRunner, GraphModel}
 import schema.{Schema, SchemaManager}
 
-
 object LynxJDBCConnector {
 
   def connect(url: String, username: String, password: String, schema: Schema): LynxJDBCConnector = {
@@ -25,6 +24,7 @@ object LynxJDBCConnector {
 }
 
 case class LynxJDBCConnector(graphModel: GraphModel, runner: CypherRunner, schema: Schema) {
+  def load(i:Int): Unit = graphModel.asInstanceOf[JDBCGraphModel].loadTableData(i)
 
   def run(query: String, param: Map[String, Any] = Map.empty): LynxResult = runner.run(query, param)
 }

@@ -55,7 +55,7 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
 
 
   private val queryCache: Cache[String, Seq[ResultSet]] = Caffeine.newBuilder()
-    .maximumSize(2000)
+    .maximumSize(1000)
     .expireAfterWrite(10, TimeUnit.MINUTES)
     .build()
 
@@ -77,22 +77,22 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
     result.iterator
   }
 
-  val GolbalCache: mutable.Map[LynxId, Seq[LynxId]] = mutable.Map()
+  private val GolbalCache: mutable.Map[LynxId, Seq[LynxId]] = mutable.Map()
 
-  // 缓存数据加载方法
-  private def loadTableData(): Unit = {
+  def loadTableData(i:Int): Unit = {
     val query =
-      """
-     SELECT Person_id, OtherPerson_id
-     FROM person_knows_person
-     WHERE Person_id IN (
-       SELECT Person_id
-       FROM person_knows_person
-       GROUP BY Person_id
-       ORDER BY COUNT(*) DESC
-       LIMIT 5000
-     )
-     """
+      s"""
+         |SELECT p.Person_id, p.OtherPerson_id
+         |FROM person_knows_person p
+         |JOIN (
+         |  SELECT Person_id
+         |  FROM person_knows_person
+         |  GROUP BY Person_id
+         |  ORDER BY COUNT(*) DESC
+         |  LIMIT $i
+         |) AS top_persons ON p.Person_id = top_persons.Person_id;
+         |
+         |""".stripMargin
 
     val resultSetIterator = execute(query)
     resultSetIterator.foreach { resultSet =>
@@ -156,14 +156,14 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
    * @param direction
    * @return
    */
-  override def expand(nodeId: LynxId, filter: RelationshipFilter, direction: SemanticDirection): Iterator[PathTriple] = {
-    filter.types.size match {
-      case 0 => Iterator()
-      case 1 => Iterator()
-      //          expand(nodeId, filter.types.headOption.get, direction)
-      //      case _ =>
-    }
-  }
+//  override def expand(nodeId: LynxId, filter: RelationshipFilter, direction: SemanticDirection): Iterator[PathTriple] = {
+//    filter.types.size match {
+//      case 0 => Iterator()
+//      case 1 => Iterator()
+//      //          expand(nodeId, filter.types.headOption.get, direction)
+//      //      case _ =>
+//    }
+//  }
 
   //  override def extendPath(path: LynxPath, relationshipFilter: RelationshipFilter, direction: SemanticDirection, steps: Int): Iterator[LynxPath] = {
   //    if (path.isEmpty || steps <= 0) return Iterator(path)
@@ -370,8 +370,69 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
   //        }
   //    }
 
+  private def bfsWithFullPaths1(
+                                startNode: LynxNode,
+                                relationshipFilter: RelationshipFilter,
+                                direction: SemanticDirection,
+                                maxSteps: Int
+                              ): Iterator[Seq[Seq[LynxId]]] = {
 
-  private def bfsWithFullPaths(
+    val visited = mutable.Set[LynxId]()
+    val initialFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]](startNode.id -> Seq(Seq(startNode.id)))
+
+    var cacheTotal = 0L
+    var cacheMisses = 0L
+
+    def bfs(): Iterator[Seq[Seq[LynxId]]] = {
+      val result = mutable.ListBuffer[Seq[Seq[LynxId]]]()
+
+      var currentFrontier = initialFrontier
+      var step = 0
+
+      while (currentFrontier.nonEmpty && step < maxSteps) {
+        val currentLayerPaths = currentFrontier.values.flatten.toSeq
+        result += currentLayerPaths
+
+        val nextFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]]()
+
+        currentFrontier.foreach { case (currentNodeId, paths) =>
+          if (!visited.contains(currentNodeId)) {
+            visited.add(currentNodeId)
+
+            val neighborIds = GolbalCache.getOrElseUpdate(
+              {
+                cacheTotal += 1
+                currentNodeId
+              }, {
+                cacheMisses += 1
+                val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+                expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
+              })
+
+            neighborIds.foreach { neighborId =>
+              val newPaths = paths.map(_ :+ neighborId)
+              nextFrontier.get(neighborId) match {
+                case Some(existingPaths) => nextFrontier.update(neighborId, existingPaths ++ newPaths)
+                case None => nextFrontier.update(neighborId, newPaths)
+              }
+            }
+          }
+        }
+
+        currentFrontier = nextFrontier
+        step += 1
+      }
+
+      val hitRate = 100L * (cacheTotal - cacheMisses) / cacheTotal
+      logger.info(f"Final Cache Hit Rate: $hitRate%% ($cacheTotal total, ${cacheTotal - cacheMisses} hits)")
+
+      result.iterator
+    }
+
+    bfs()
+  }
+
+  private def bfsWithFullPaths2(
                                 startNode: LynxNode,
                                 relationshipFilter: RelationshipFilter,
                                 direction: SemanticDirection,
@@ -392,11 +453,11 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
         currentFrontier.foreach { case (currentNodeId, paths) =>
           val neighborIds = GolbalCache.getOrElseUpdate(
             {
-              cacheTotal+=1
+              cacheTotal += 1
               currentNodeId
             }, {
-              cacheMisses+=1
-//              logger.info(s"Cache miss for node: $currentNodeId")
+              cacheMisses += 1
+              //              logger.info(s"Cache miss for node: $currentNodeId")
               val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
               expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
             })
@@ -408,7 +469,8 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
             }
           }
         }
-        logger.info(s"Cache hit rate: ${cacheMisses/cacheTotal}% hit:${cacheTotal-cacheMisses}")
+        val rate :Long = 100*(cacheTotal - cacheMisses) / cacheTotal
+        logger.info(s"Cache hit rate: $rate% hit:${cacheTotal - cacheMisses} t:$cacheTotal")
         Iterator.single(currentLayerPaths) ++ bfsRecursive(nextFrontier, step + 1)
       }
     }
@@ -443,8 +505,8 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
 
     val relType = relationshipFilter.types.head.value
     val relTable = schema.getReltionshipByType(relType)
-
-    val bfsIterator = bfsWithFullPaths(start, relationshipFilter, direction, steps)
+    //    loadTableData()
+    val bfsIterator = bfsWithFullPaths1(start, relationshipFilter, direction, steps)
 
     val bfsSeq = bfsIterator.toSeq
     bfsSeq.last.iterator.map { ids =>
