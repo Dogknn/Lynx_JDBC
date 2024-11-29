@@ -12,10 +12,11 @@ import org.opencypher.v9_0.expressions.SemanticDirection
 import schema._
 
 import java.sql.{Connection, ResultSet}
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ForkJoinPool, TimeUnit}
 import scala.collection.compat.toMutableQueueExtensionMethods
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.parallel.ForkJoinTaskSupport
 
 class JDBCGraphModel(val connection: Connection, val schema: Schema) extends GraphModel with LazyLogging {
   override def write: WriteTask = new WriteTask {
@@ -79,7 +80,7 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
 
   private val GolbalCache: mutable.Map[LynxId, Seq[LynxId]] = mutable.Map()
 
-  def loadTableData(i:Int): Unit = {
+  def loadTableData(i: Int): Unit = {
     val query =
       s"""
          |SELECT p.Person_id, p.OtherPerson_id
@@ -103,7 +104,6 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
       GolbalCache.update(personId, currentNeighbors :+ otherPersonId)
     }
   }
-
 
   private def execute(sql: String): Iterator[ResultSet] = {
     logger.info(sql)
@@ -156,14 +156,14 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
    * @param direction
    * @return
    */
-//  override def expand(nodeId: LynxId, filter: RelationshipFilter, direction: SemanticDirection): Iterator[PathTriple] = {
-//    filter.types.size match {
-//      case 0 => Iterator()
-//      case 1 => Iterator()
-//      //          expand(nodeId, filter.types.headOption.get, direction)
-//      //      case _ =>
-//    }
-//  }
+  //  override def expand(nodeId: LynxId, filter: RelationshipFilter, direction: SemanticDirection): Iterator[PathTriple] = {
+  //    filter.types.size match {
+  //      case 0 => Iterator()
+  //      case 1 => Iterator()
+  //      //          expand(nodeId, filter.types.headOption.get, direction)
+  //      //      case _ =>
+  //    }
+  //  }
 
   //  override def extendPath(path: LynxPath, relationshipFilter: RelationshipFilter, direction: SemanticDirection, steps: Int): Iterator[LynxPath] = {
   //    if (path.isEmpty || steps <= 0) return Iterator(path)
@@ -318,6 +318,44 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
     }
   }
 
+  private def expandToIdsBatch(
+                                nodeIds: Iterator[LynxId],
+                                nodeTable: String,
+                                filter: RelationshipFilter,
+                                direction: SemanticDirection,
+                                batchSize: Int = 100
+                              ): Iterator[LynxId] = {
+    //TODO
+    val rel_Type = filter.types.head.value
+    val rel_Condition = filter.properties.map {
+      case (k, v) => s"${k.value} = ${v.value}"
+    }
+
+    val relTable = schema.getReltionshipByType(rel_Type)
+    if (relTable.targetTableName != nodeTable && relTable.sourceTableName != nodeTable) return Iterator.empty
+
+    val whereSql = (direction match {
+      case SemanticDirection.OUTGOING => s"where ${relTable.bindingTable}.${relTable.targetCol.columnName} in (?)"
+      case SemanticDirection.INCOMING => s"where ${relTable.bindingTable}.${relTable.sourceCol.columnName} in (?)"
+      case SemanticDirection.BOTH => s"where ${relTable.bindingTable}.${relTable.sourceCol.columnName} in (?) "
+    }) + (if (rel_Condition.nonEmpty) " and " + rel_Condition.mkString(" and ") else "")
+
+    nodeIds.grouped(batchSize).flatMap { batch =>
+      val ids = batch.map(_.toLynxInteger.value).mkString(",")
+      val sql = s"select ${relTable.sourceCol.columnName}, ${relTable.targetCol.columnName} from ${relTable.bindingTable} $whereSql"
+
+      direction match {
+        case SemanticDirection.OUTGOING =>
+          execute(sql.replace("?", ids)).map(rs => LynxIntegerID(rs.getLong(relTable.sourceCol.columnName))).toSeq
+        case SemanticDirection.INCOMING =>
+          execute(sql.replace("?", ids)).map(rs => LynxIntegerID(rs.getLong(relTable.targetCol.columnName))).toSeq
+        case SemanticDirection.BOTH =>
+          execute(sql.replace("?", ids)).map(rs => LynxIntegerID(rs.getLong(relTable.targetCol.columnName))).toSeq
+      }
+    }
+  }
+
+
   private def getNode(id: LynxId, tableName: String): Option[LynxNode] = {
     val nodeId = schema.getTableByName(tableName).priKeyCol.columnName
     singleTableSelect(tableName, List((nodeId, id.toLynxInteger.v)))
@@ -340,6 +378,51 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
         if (idCondition == "") return Iterator.empty
         val sql = s"select * from ${t.tableName} where $idCondition"
         executeQuery(sql).map(rs => Mapper.mapNode(rs, tableName, schema))
+    }
+  }
+
+  private def nodesAtBatch(ids: Iterator[LynxId], tableName: String, batchSize: Int = 100): Iterator[LynxNode] = {
+    val table = schema.getTableByName(tableName)
+
+    table match {
+      case RDBTable.empty =>
+        Iterator.empty
+      case t: RDBTable =>
+        val batchedIds = ids.grouped(batchSize)
+        new Iterator[LynxNode] {
+          private var currentBatch: Iterator[LynxId] = _
+          private var currentResults: Iterator[LynxNode] = Iterator.empty
+
+          def loadNextBatch(): Unit = {
+            if (batchedIds.hasNext) {
+              currentBatch = batchedIds.next().toIterator
+              val idCondition = currentBatch.map(id => s"${id.value}").mkString(",")
+              if (idCondition.nonEmpty) {
+                val sql = s"select * from ${t.tableName} where id in ($idCondition)"
+                currentResults = execute(sql).map(rs => Mapper.mapNode(rs, tableName, schema))
+              } else {
+                currentResults = Iterator.empty
+              }
+            } else {
+              currentResults = Iterator.empty
+            }
+          }
+
+          def hasNext: Boolean = {
+            if (currentResults.isEmpty) {
+              loadNextBatch()
+            }
+            currentResults.hasNext
+          }
+
+          def next(): LynxNode = {
+            if (hasNext) {
+              currentResults.next()
+            } else {
+              throw new NoSuchElementException("No more nodes available.")
+            }
+          }
+        }
     }
   }
 
@@ -370,16 +453,181 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
   //        }
   //    }
 
-  private def bfsWithFullPaths1(
-                                startNode: LynxNode,
-                                relationshipFilter: RelationshipFilter,
-                                direction: SemanticDirection,
-                                maxSteps: Int
-                              ): Iterator[Seq[Seq[LynxId]]] = {
+  //  private def bfsWithFullPaths1(
+  //                                 startNode: LynxNode,
+  //                                 relationshipFilter: RelationshipFilter,
+  //                                 direction: SemanticDirection,
+  //                                 maxSteps: Int
+  //                               ): Iterator[Seq[Seq[LynxId]]] = {
+  //
+  //    val visited = mutable.Set[LynxId]()
+  //    val initialFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]](startNode.id -> Seq(Seq(startNode.id)))
+  //
+  //    var cacheTotal = 0L
+  //    var cacheMisses = 0L
+  //
+  //    def bfs(): Iterator[Seq[Seq[LynxId]]] = {
+  //      val result = mutable.ListBuffer[Seq[Seq[LynxId]]]()
+  //
+  //      var currentFrontier = initialFrontier
+  //      var step = 0
+  //
+  //      while (currentFrontier.nonEmpty && step < maxSteps) {
+  //        val currentLayerPaths = currentFrontier.values.flatten.toSeq
+  //        result += currentLayerPaths
+  //
+  //        val nextFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]]()
+  //
+  //        currentFrontier.foreach { case (currentNodeId, paths) =>
+  //          if (!visited.contains(currentNodeId)) {
+  //            visited.add(currentNodeId)
+  //
+  //            val neighborIds = GolbalCache.getOrElseUpdate(
+  //              {
+  //                cacheTotal += 1
+  //                currentNodeId
+  //              }, {
+  //                cacheMisses += 1
+  //                val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+  //                expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
+  //              })
+  //
+  //            neighborIds.foreach { neighborId =>
+  //              val newPaths = paths.map(_ :+ neighborId)
+  //              nextFrontier.get(neighborId) match {
+  //                case Some(existingPaths) => nextFrontier.update(neighborId, existingPaths ++ newPaths)
+  //                case None => nextFrontier.update(neighborId, newPaths)
+  //              }
+  //            }
+  //          }
+  //        }
+  //
+  //        currentFrontier = nextFrontier
+  //        step += 1
+  //      }
+  //
+  //      val hitRate = 100L * (cacheTotal - cacheMisses) / cacheTotal
+  //      logger.info(f"Final Cache Hit Rate: $hitRate%% ($cacheTotal total, ${cacheTotal - cacheMisses} hits)")
+  //
+  //      result.iterator
+  //    }
+  //
+  //    bfs()
+  //  }
+
+  //  private def bfsWithFullPaths2(
+  //                                 startNode: LynxNode,
+  //                                 relationshipFilter: RelationshipFilter,
+  //                                 direction: SemanticDirection,
+  //                                 maxSteps: Int
+  //                               ): Iterator[Seq[Seq[LynxId]]] = {
+  //
+  //    def bfsRecursive(
+  //                      currentFrontier: mutable.HashMap[LynxId, Seq[Seq[LynxId]]],
+  //                      step: Int
+  //                    ): Iterator[Seq[Seq[LynxId]]] = {
+  //      if (currentFrontier.isEmpty || step >= maxSteps) {
+  //        Iterator.empty
+  //      } else {
+  //        var cacheTotal = 0
+  //        var cacheMisses = 0
+  //        val currentLayerPaths = currentFrontier.values.flatten.toSeq
+  //        val nextFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]]()
+  //        currentFrontier.foreach { case (currentNodeId, paths) =>
+  //          val neighborIds = GolbalCache.getOrElseUpdate(
+  //            {
+  //              cacheTotal += 1
+  //              currentNodeId
+  //            }, {
+  //              cacheMisses += 1
+  //              //              logger.info(s"Cache miss for node: $currentNodeId")
+  //              val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+  //              expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
+  //            })
+  //          neighborIds.foreach { neighborId =>
+  //            val newPaths = paths.map(_ :+ neighborId)
+  //            nextFrontier.get(neighborId) match {
+  //              case Some(existingPaths) => nextFrontier.update(neighborId, existingPaths ++ newPaths)
+  //              case None => nextFrontier.update(neighborId, newPaths)
+  //            }
+  //          }
+  //        }
+  //        val rate: Long = 100 * (cacheTotal - cacheMisses) / cacheTotal
+  //        logger.info(s"Cache hit rate: $rate% hit:${cacheTotal - cacheMisses} t:$cacheTotal")
+  //        Iterator.single(currentLayerPaths) ++ bfsRecursive(nextFrontier, step + 1)
+  //      }
+  //    }
+  //
+  //    val startNodeId = startNode.id
+  //    val initialFrontier = mutable.HashMap(startNodeId -> Seq(Seq(startNodeId)))
+  //    bfsRecursive(initialFrontier, 0)
+  //  }
+
+  //  private def bfsWithFullPaths3(
+  //                                 startNode: LynxNode,
+  //                                 relationshipFilter: RelationshipFilter,
+  //                                 direction: SemanticDirection,
+  //                                 maxSteps: Int
+  //                               ): Iterator[Seq[Seq[LynxId]]] = {
+  //
+  //    val visited = mutable.Set[LynxId]()
+  //    val initialFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]](startNode.id -> Seq(Seq(startNode.id)))
+  //    var cacheTotal = 0L
+  //    var cacheMisses = 0L
+  //
+  //    def bfs(): Iterator[Seq[Seq[LynxId]]] = {
+  //      val result = mutable.ListBuffer[Seq[Seq[LynxId]]]()
+  //
+  //      var currentFrontier = initialFrontier
+  //      var step = 0
+  //
+  //      while (currentFrontier.nonEmpty && step < maxSteps) {
+  //        val currentLayerPaths = currentFrontier.values.flatten.toSeq
+  //        result += currentLayerPaths
+  //
+  //        val nextFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]]()
+  //
+  //        currentFrontier.foreach { case (currentNodeId, paths) =>
+  //          if (!visited.contains(currentNodeId)) {
+  //            visited.add(currentNodeId)
+  //
+  //            val neighborIds = GolbalCache.getOrElseUpdate(
+  //              {
+  //                cacheTotal += 1
+  //                currentNodeId
+  //              }, {
+  //                cacheMisses += 1
+  //                val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+  //                expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
+  //              })
+  //            neighborIds.foreach { neighborId =>
+  //              val newPaths = paths.map(_ :+ neighborId)
+  //              val existingPaths = nextFrontier.getOrElse(neighborId, Seq())
+  //              nextFrontier.update(neighborId, existingPaths ++ newPaths)
+  //            }
+  //          }
+  //        }
+  //        currentFrontier = nextFrontier
+  //        step += 1
+  //      }
+  //      val hitRate = 100L * (cacheTotal - cacheMisses) / cacheTotal
+  //      logger.info(f"Final Cache Hit Rate: $hitRate%% ($cacheTotal total, ${cacheTotal - cacheMisses} hits)")
+  //      result.iterator
+  //    }
+  //
+  //    bfs()
+  //  }
+
+
+  private def bfsWithFullPaths4(
+                                 startNode: LynxNode,
+                                 relationshipFilter: RelationshipFilter,
+                                 direction: SemanticDirection,
+                                 maxSteps: Int
+                               ): Iterator[Seq[Seq[LynxId]]] = {
 
     val visited = mutable.Set[LynxId]()
     val initialFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]](startNode.id -> Seq(Seq(startNode.id)))
-
     var cacheTotal = 0L
     var cacheMisses = 0L
 
@@ -389,6 +637,7 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
       var currentFrontier = initialFrontier
       var step = 0
 
+      // 普通步骤：循环并扩展前沿
       while (currentFrontier.nonEmpty && step < maxSteps) {
         val currentLayerPaths = currentFrontier.values.flatten.toSeq
         result += currentLayerPaths
@@ -408,19 +657,20 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
                 val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
                 expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
               })
-
             neighborIds.foreach { neighborId =>
               val newPaths = paths.map(_ :+ neighborId)
-              nextFrontier.get(neighborId) match {
-                case Some(existingPaths) => nextFrontier.update(neighborId, existingPaths ++ newPaths)
-                case None => nextFrontier.update(neighborId, newPaths)
-              }
+              val existingPaths = nextFrontier.getOrElse(neighborId, Seq())
+              nextFrontier.update(neighborId, existingPaths ++ newPaths)
             }
           }
         }
-
         currentFrontier = nextFrontier
         step += 1
+      }
+
+      if (currentFrontier.nonEmpty) {
+        val currentLayerPaths = currentFrontier.values.flatten.toSeq
+        result += currentLayerPaths
       }
 
       val hitRate = 100L * (cacheTotal - cacheMisses) / cacheTotal
@@ -432,52 +682,154 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
     bfs()
   }
 
-  private def bfsWithFullPaths2(
-                                startNode: LynxNode,
-                                relationshipFilter: RelationshipFilter,
-                                direction: SemanticDirection,
-                                maxSteps: Int
-                              ): Iterator[Seq[Seq[LynxId]]] = {
+  //  private def bfsLastFrontier1(
+  //                                startNode: LynxNode,
+  //                                relationshipFilter: RelationshipFilter,
+  //                                direction: SemanticDirection,
+  //                                maxSteps: Int
+  //                              ): Seq[LynxId] = {
+  //
+  //    val visited = mutable.Set[LynxId]()
+  //    val initialFrontier = mutable.Set[LynxId](startNode.id)
+  //    var cacheTotal = 0L
+  //    var cacheMisses = 0L
+  //    val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+  //
+  //    def bfs(): Seq[LynxId] = {
+  //      var currentFrontier = initialFrontier
+  //      var step = 0
+  //      while (currentFrontier.nonEmpty && step < maxSteps) {
+  //        val nextFrontier = mutable.Set[LynxId]()
+  //        currentFrontier.foreach { currentNodeId =>
+  //          if (visited.add(currentNodeId)) {
+  //            val neighborIds = GolbalCache.getOrElseUpdate(
+  //              {
+  //                cacheTotal += 1
+  //                currentNodeId
+  //              }, {
+  //                cacheMisses += 1
+  //                expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
+  //              }
+  //            )
+  //            neighborIds.foreach(nextFrontier.add)
+  //          }
+  //        }
+  //        currentFrontier = nextFrontier
+  //        step += 1
+  //      }
+  //      val hitRate = if (cacheTotal > 0) 100L * (cacheTotal - cacheMisses) / cacheTotal else 0L
+  //      logger.info(f"Final Cache Hit Rate: $hitRate%% ($cacheTotal total, ${cacheTotal - cacheMisses} hits)")
+  //      currentFrontier.toSeq
+  //    }
+  //
+  //    bfs()
+  //  }
 
-    def bfsRecursive(
-                      currentFrontier: mutable.HashMap[LynxId, Seq[Seq[LynxId]]],
-                      step: Int
-                    ): Iterator[Seq[Seq[LynxId]]] = {
-      if (currentFrontier.isEmpty || step >= maxSteps) {
-        Iterator.empty
-      } else {
-        var cacheTotal = 0
-        var cacheMisses = 0
-        val currentLayerPaths = currentFrontier.values.flatten.toSeq
-        val nextFrontier = mutable.HashMap[LynxId, Seq[Seq[LynxId]]]()
-        currentFrontier.foreach { case (currentNodeId, paths) =>
+  private def bfsLastFrontier(
+                               startNode: LynxNode,
+                               relationshipFilter: RelationshipFilter,
+                               direction: SemanticDirection,
+                               maxSteps: Int
+                             ): Seq[LynxId] = {
+
+    val initialFrontier = mutable.Set[LynxId](startNode.id)
+    val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+
+    def bfs(): Seq[LynxId] = {
+      var currentFrontier = initialFrontier
+      var step = 0
+      while (currentFrontier.nonEmpty && step < maxSteps) {
+        val nextFrontier = mutable.Set[LynxId]()
+        currentFrontier.foreach { currentNodeId =>
           val neighborIds = GolbalCache.getOrElseUpdate(
-            {
-              cacheTotal += 1
-              currentNodeId
-            }, {
-              cacheMisses += 1
-              //              logger.info(s"Cache miss for node: $currentNodeId")
-              val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
-              expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
-            })
-          neighborIds.foreach { neighborId =>
-            val newPaths = paths.map(_ :+ neighborId)
-            nextFrontier.get(neighborId) match {
-              case Some(existingPaths) => nextFrontier.update(neighborId, existingPaths ++ newPaths)
-              case None => nextFrontier.update(neighborId, newPaths)
-            }
-          }
+            currentNodeId,
+            expandToIds(currentNodeId, nodeTable, relationshipFilter, direction)
+          )
+          nextFrontier ++= neighborIds
         }
-        val rate :Long = 100*(cacheTotal - cacheMisses) / cacheTotal
-        logger.info(s"Cache hit rate: $rate% hit:${cacheTotal - cacheMisses} t:$cacheTotal")
-        Iterator.single(currentLayerPaths) ++ bfsRecursive(nextFrontier, step + 1)
+        currentFrontier = nextFrontier
+        step += 1
+      }
+      currentFrontier.toSeq
+    }
+
+    bfs()
+  }
+
+  private def bfsLastFrontierBatch(
+                                    startNode: LynxNode,
+                                    relationshipFilter: RelationshipFilter,
+                                    direction: SemanticDirection,
+                                    maxSteps: Int,
+                                    batchSize: Int = 1000
+                                  ): Seq[LynxId] = {
+
+    val initialFrontier = mutable.Set[LynxId](startNode.id)
+    val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+
+    def batchExpandToIds(nodeIds: Iterator[LynxId]): Iterator[LynxId] = {
+      nodeIds.grouped(batchSize).flatMap { batch =>
+        val neighborIds = expandToIdsBatch(batch.iterator, nodeTable, relationshipFilter, direction, batchSize)
+        neighborIds
       }
     }
 
-    val startNodeId = startNode.id
-    val initialFrontier = mutable.HashMap(startNodeId -> Seq(Seq(startNodeId)))
-    bfsRecursive(initialFrontier, 0)
+    def bfs(): Seq[LynxId] = {
+      var currentFrontier = initialFrontier
+      var step = 0
+      while (currentFrontier.nonEmpty && step < maxSteps) {
+        val nextFrontier = mutable.Set[LynxId]()
+        batchExpandToIds(currentFrontier.iterator).foreach { neighborId =>
+          nextFrontier += neighborId
+        }
+        currentFrontier = nextFrontier
+        step += 1
+      }
+      currentFrontier.toSeq
+    }
+
+    bfs()
+  }
+
+  private def bfsLastFrontierBatchWithCache(
+                                             startNode: LynxNode,
+                                             relationshipFilter: RelationshipFilter,
+                                             direction: SemanticDirection,
+                                             maxSteps: Int,
+                                             batchSize: Int = 1000
+                                           ): Seq[LynxId] = {
+
+    val initialFrontier = mutable.Set[LynxId](startNode.id)
+    val nodeTable = schema.getNodeByNodeLabel(startNode.labels.head.value).tableName
+    var hit = 0
+
+    def batchExpandToIds(nodeIds: Iterator[LynxId]): Iterator[LynxId] = {
+      nodeIds.grouped(batchSize).flatMap { batch =>
+        val nodeIdsToFetch = batch.filterNot(nodeId => GolbalCache.contains(nodeId))
+        val missingNeighbors = expandToIdsBatch(nodeIdsToFetch.iterator, nodeTable, relationshipFilter, direction, batchSize)
+        val cachedNeighbors = batch.filter(GolbalCache.contains).flatMap { nodeId =>
+          GolbalCache.getOrElse(nodeId, Seq.empty)
+        }
+        missingNeighbors ++ cachedNeighbors
+      }
+    }
+
+
+    def bfs(): Seq[LynxId] = {
+      var currentFrontier = initialFrontier
+      var step = 0
+      while (currentFrontier.nonEmpty && step < maxSteps) {
+        val nextFrontier = mutable.Set[LynxId]()
+        batchExpandToIds(currentFrontier.iterator).foreach { neighborId =>
+          nextFrontier += neighborId
+        }
+        currentFrontier = nextFrontier
+        step += 1
+      }
+      currentFrontier.toSeq
+    }
+
+    bfs()
   }
 
 
@@ -487,9 +839,10 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
                               direction: SemanticDirection,
                               steps: Int
                             ): Iterator[LynxPath] = {
+    val switchMaker = 1
     if (steps <= 0) return Iterator(LynxPath.startPoint(start))
     steps match {
-      case 1 => return expand(start, relationshipFilter, direction)
+      case 1 => expand(start, relationshipFilter, direction)
         .flatMap { triple =>
           expandNonStop(triple.endNode, relationshipFilter, direction, steps - 1)
             .filterNot(_.nodeIds.contains(triple.startNode.id))
@@ -497,33 +850,56 @@ class JDBCGraphModel(val connection: Connection, val schema: Schema) extends Gra
               _.connectLeft(triple.toLynxPath)
             }
         }
-      case _ =>
-    }
+      case _ => switchMaker match {
+        case 1 =>
+          val nodeLabel = start.labels.head.value
+          val nodeTable = schema.getNodeByNodeLabel(nodeLabel).tableName
+          val relType = relationshipFilter.types.head.value
+          val relTable = schema.getReltionshipByType(relType)
+          val bfsIterator = bfsWithFullPaths4(start, relationshipFilter, direction, steps)
 
-    val nodeLabel = start.labels.head.value
-    val nodeTable = schema.getNodeByNodeLabel(nodeLabel).tableName
+          val bfsSeq = bfsIterator.toSeq
+          logger.info(f"${bfsSeq.last.length}")
+          bfsSeq.last.iterator.map { ids =>
+            ids.zipWithIndex.flatMap { case (nodeId, index) =>
+              val currentNode = getNode(nodeId, nodeTable).get
+              if (index < ids.length - 1) {
+                val nextNodeId = ids(index + 1)
+                val relationship = getRel(currentNode, getNode(nextNodeId, nodeTable).get, relTable).get
+                Seq(currentNode, relationship)
+              } else {
+                Seq(currentNode)
+              }
+            }
+          } map { path => LynxPath(path) }
 
-    val relType = relationshipFilter.types.head.value
-    val relTable = schema.getReltionshipByType(relType)
-    //    loadTableData()
-    val bfsIterator = bfsWithFullPaths1(start, relationshipFilter, direction, steps)
-
-    val bfsSeq = bfsIterator.toSeq
-    bfsSeq.last.iterator.map { ids =>
-      ids.zipWithIndex.flatMap { case (nodeId, index) =>
-        val currentNode = getNode(nodeId, nodeTable).get
-        if (index < ids.length - 1) {
-          val nextNodeId = ids(index + 1)
-          val relationship = getRel(currentNode, getNode(nextNodeId, nodeTable).get, relTable).get
-          Seq(currentNode, relationship)
-        } else {
-          Seq(currentNode)
-        }
+        case 2 =>
+          val nodeLabel = start.labels.head.value
+          val nodeTable = schema.getNodeByNodeLabel(nodeLabel).tableName
+          val bfsIterator = bfsLastFrontierBatch(start, relationshipFilter, direction, steps)
+          logger.info(f"${bfsIterator.length}")
+          //          bfsIterator.iterator.map { endId =>
+          //            val multiRelationshipPath = LynxJDBCRelationship(
+          //              LynxIntegerID(start.id.toLynxInteger.v),
+          //              LynxIntegerID(start.id.toLynxInteger.v),
+          //              LynxIntegerID(endId.toLynxInteger.v),
+          //              Some(relationshipFilter.types.head),
+          //              Map.empty
+          //            )
+          //            val endNode = getNode(endId, nodeTable).get
+          //            PathTriple(start, multiRelationshipPath, endNode).toLynxPath
+          //          }
+          nodesAtBatch(bfsIterator.iterator, nodeTable).map { endNode =>
+            LynxPath(Seq(start, LynxJDBCRelationship(
+              LynxIntegerID(start.id.toLynxInteger.v),
+              LynxIntegerID(start.id.toLynxInteger.v),
+              LynxIntegerID(endNode.id.toLynxInteger.v),
+              Some(relationshipFilter.types.head),
+              Map.empty), endNode))
+          }
       }
-    } map { path => LynxPath(path) }
-
+    }
   }
-
 
   override def paths(startNodeFilter: NodeFilter,
                      relationshipFilter: RelationshipFilter,
